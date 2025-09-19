@@ -9,6 +9,10 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY_FRONTEND: portfolio-frontend
   ECR_REPOSITORY_BACKEND: portfolio-backend
+  # Force skip settings (set to 'true' to always skip regardless of commit message)
+  FORCE_SKIP_FRONTEND: "true"
+  FORCE_SKIP_BACKEND: "true"
+  FORCE_SKIP_DEPLOY: "false"
 
 jobs:
   build-and-deploy:
@@ -17,6 +21,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set skip flags
+        id: check-skip
+        run: |
+          # Set skip flags based on environment variables only
+          echo "skip-frontend=${{ env.FORCE_SKIP_FRONTEND }}" >> $GITHUB_OUTPUT
+          echo "skip-backend=${{ env.FORCE_SKIP_BACKEND }}" >> $GITHUB_OUTPUT
+          echo "skip-deploy=${{ env.FORCE_SKIP_DEPLOY }}" >> $GITHUB_OUTPUT
+
+          echo "Frontend skip: ${{ env.FORCE_SKIP_FRONTEND }}"
+          echo "Backend skip: ${{ env.FORCE_SKIP_BACKEND }}"
+          echo "Deploy skip: ${{ env.FORCE_SKIP_DEPLOY }}"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -30,6 +46,21 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push frontend image
+        if: steps.check-skip.outputs.skip-frontend == 'false'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        working-directory: ./frontend
+        run: |
+          echo "Building frontend (not skipped)..."
+          aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND 2>/dev/null || \
+            aws ecr create-repository --repository-name $ECR_REPOSITORY_FRONTEND
+
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
+
+      - name: Build and push backend image
+        if: steps.check-skip.outputs.skip-backend == 'false'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -42,11 +73,13 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
 
       - name: Build and push backend image
+        if: steps.check-skip.outputs.skip-backend == 'false'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         working-directory: ./backend
         run: |
+          echo "Building backend (not skipped)..."
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND 2>/dev/null || \
             aws ecr create-repository --repository-name $ECR_REPOSITORY_BACKEND
 
@@ -54,6 +87,7 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
 
       - name: Deploy infrastructure
+        if: steps.check-skip.outputs.skip-deploy == 'false'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -69,7 +103,9 @@ jobs:
             --no-fail-on-empty-changeset
 
       - name: Update ECS service
+        if: steps.check-skip.outputs.skip-deploy == 'false'
         run: |
+          echo "Updating ECS service (not skipped)..."
           aws ecs update-service \
             --cluster portfolio-cluster \
             --service portfolio-service \
@@ -80,9 +116,17 @@ jobs:
             --services portfolio-service
 
       - name: Get deployment URL
+        if: steps.check-skip.outputs.skip-deploy == 'false'
         run: |
           URL=$(aws cloudformation describe-stacks \
             --stack-name portfolio-infrastructure \
             --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerURL`].OutputValue' \
             --output text)
           echo "Deployment complete! URL: $URL"
+
+      - name: Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: ${{ steps.check-skip.outputs.skip-frontend == 'true' && '⏭️ Skipped' || '✅ Built' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend: ${{ steps.check-skip.outputs.skip-backend == 'true' && '⏭️ Skipped' || '✅ Built' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Deploy: ${{ steps.check-skip.outputs.skip-deploy == 'true' && '⏭️ Skipped' || '✅ Deployed' }}" >> $GITHUB_STEP_SUMMARY
