@@ -115,6 +115,15 @@ jobs:
               MongoDBURI="${{ secrets.MONGODB_URI }}" \
             --no-fail-on-empty-changeset
 
+      - name: Check CloudFormation stack events
+        if: steps.check-skip.outputs.skip-deploy == 'false'
+        run: |
+          echo "Checking CloudFormation stack events for debugging..."
+          aws cloudformation describe-stack-events \
+            --stack-name portfolio-infrastructure \
+            --query 'StackEvents[0:10].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+            --output table || echo "Could not retrieve stack events (stack may not exist yet)"
+
       - name: Update ECS service
         if: steps.check-skip.outputs.skip-deploy == 'false'
         run: |
