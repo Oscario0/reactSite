@@ -8,6 +8,7 @@ import (
     "github.com/gin-gonic/gin"
     "go.mongodb.org/mongo-driver/bson"
     "go.mongodb.org/mongo-driver/mongo"
+    "go.mongodb.org/mongo-driver/mongo/options"
     
     "portfolio-backend/models"
 )
@@ -75,10 +76,9 @@ func (h *PortfolioHandler) UpdatePortfolio(c *gin.Context) {
     defer cancel()
     
     filter := bson.M{}
-    update := bson.M{"$set": portfolio}
-    options := mongo.NewReplaceOptions().SetUpsert(true)
+    opts := options.Replace().SetUpsert(true)
     
-    _, err := h.collection.ReplaceOne(ctx, filter, portfolio, options)
+    _, err := h.collection.ReplaceOne(ctx, filter, portfolio, opts)
     if err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update portfolio"})
         return
