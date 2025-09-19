@@ -92,6 +92,19 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          STACK_STATUS=$(aws cloudformation describe-stacks --stack-name portfolio-infrastructure --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+
+          echo "Current stack status: $STACK_STATUS"
+
+          if [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ]; then
+            echo "Stack is in ROLLBACK_COMPLETE state. Deleting stack first..."
+            aws cloudformation delete-stack --stack-name portfolio-infrastructure
+            echo "Waiting for stack deletion to complete..."
+            aws cloudformation wait stack-delete-complete --stack-name portfolio-infrastructure
+            echo "Stack deleted successfully."
+          fi
+
+          echo "Deploying infrastructure..."
           aws cloudformation deploy \
             --template-file infra/main.yml \
             --stack-name portfolio-infrastructure \
