@@ -64,19 +64,6 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-        working-directory: ./frontend
-        run: |
-          aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND 2>/dev/null || \
-            aws ecr create-repository --repository-name $ECR_REPOSITORY_FRONTEND
-
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
-
-      - name: Build and push backend image
-        if: steps.check-skip.outputs.skip-backend == 'false'
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
         working-directory: ./backend
         run: |
           echo "Building backend (not skipped)..."
@@ -113,16 +100,20 @@ jobs:
               FrontendImage=$ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
               BackendImage=$ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG \
               MongoDBURI="${{ secrets.MONGODB_URI }}" \
-            --no-fail-on-empty-changeset
+            --no-fail-on-empty-changeset || {
+            echo "CloudFormation deployment failed! Checking stack events for debugging..."
+            aws cloudformation describe-stack-events \
+              --stack-name portfolio-infrastructure \
+              --query 'StackEvents[0:20].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+              --output table || echo "Could not retrieve stack events"
+            exit 1
+          }
 
-      - name: Check CloudFormation stack events
-        if: steps.check-skip.outputs.skip-deploy == 'false'
-        run: |
-          echo "Checking CloudFormation stack events for debugging..."
+          echo "Deployment successful! Checking final stack events..."
           aws cloudformation describe-stack-events \
             --stack-name portfolio-infrastructure \
             --query 'StackEvents[0:10].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
-            --output table || echo "Could not retrieve stack events (stack may not exist yet)"
+            --output table || echo "Could not retrieve stack events"
 
       - name: Update ECS service
         if: steps.check-skip.outputs.skip-deploy == 'false'
