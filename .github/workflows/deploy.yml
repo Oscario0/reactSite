@@ -1,65 +1,413 @@
-name: Deploy to AWS ECS
+name: 🚀 Deploy Portfolio to AWS ECS
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:  # Manual trigger
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
 
 env:
   AWS_REGION: us-east-1
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
   ECR_REPOSITORY_FRONTEND: portfolio-frontend
   ECR_REPOSITORY_BACKEND: portfolio-backend
-  ECS_SERVICE: portfolio-service
-  ECS_CLUSTER: portfolio-cluster
 
 jobs:
-  deploy:
-    name: Deploy
+  # Test Frontend
+  test-frontend:
+    name: 🧪 Test Frontend
     runs-on: ubuntu-latest
-    environment: production
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
 
-    steps:  
-    - name: Checkout
-      uses: actions/checkout@v3
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: 📋 Install dependencies
+        working-directory: ./frontend
+        run: |
+          npm ci
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
+      - name: 🧪 Run tests
+        working-directory: ./frontend
+        run: |
+          npm test -- --coverage --watchAll=false
 
-    - name: Build, tag, and push frontend image to Amazon ECR
-      id: build-frontend-image
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        cd frontend
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
-        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG" >> $GITHUB_OUTPUT
+      - name: 🏗️ Build frontend
+        working-directory: ./frontend
+        run: |
+          npm run build
 
-    - name: Build, tag, and push backend image to Amazon ECR
-      id: build-backend-image
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        cd backend
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
-        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG" >> $GITHUB_OUTPUT
+      - name: 📊 Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          directory: ./frontend/coverage
 
-    - name: Deploy to Amazon ECS
-      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-      with:
-        task-definition: task-definition.json
-        service: ${{ env.ECS_SERVICE }}
-        cluster: ${{ env.ECS_CLUSTER }}
-        wait-for-service-stability: true
+  # Test Backend
+  test-backend:
+    name: 🧪 Test Backend
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:6.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "echo 'db.runCommand(\"ping\").ok' | mongosh localhost:27017/test --quiet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐹 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: backend/go.sum
+
+      - name: 📋 Install dependencies
+        working-directory: ./backend
+        run: |
+          go mod download
+          go mod verify
+
+      - name: 🧪 Run tests
+        working-directory: ./backend
+        env:
+          MONGODB_URI: mongodb://localhost:27017/test
+          PORT: 8080
+        run: |
+          go test -v -race -coverprofile=coverage.out ./...
+
+      - name: 🏗️ Build backend
+        working-directory: ./backend
+        run: |
+          CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+
+      - name: 📊 Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./backend/coverage.out
+
+  # Build and Push Images
+  build-and-push:
+    name: 🐳 Build & Push Images
+    runs-on: ubuntu-latest
+    needs: [test-frontend, test-backend]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    outputs:
+      frontend-image: ${{ steps.build-frontend.outputs.image }}
+      backend-image: ${{ steps.build-backend.outputs.image }}
+      environment: ${{ steps.set-env.outputs.environment }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🏷️ Set environment
+        id: set-env
+        run: |
+          if [[ ${{ github.ref }} == 'refs/heads/main' ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          elif [[ ${{ github.ref }} == 'refs/heads/develop' ]]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          else
+            echo "environment=${{ github.event.inputs.environment || 'development' }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔧 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🔑 Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: 🏗️ Build and push frontend image
+        id: build-frontend
+        env:
+          IMAGE_TAG: ${{ github.sha }}-${{ steps.set-env.outputs.environment }}
+        working-directory: ./frontend
+        run: |
+          # Create ECR repository if it doesn't exist
+          aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND 2>/dev/null || \
+            aws ecr create-repository --repository-name $ECR_REPOSITORY_FRONTEND
+
+          # Build, tag and push
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:latest
+
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: 🏗️ Build and push backend image
+        id: build-backend
+        env:
+          IMAGE_TAG: ${{ github.sha }}-${{ steps.set-env.outputs.environment }}
+        working-directory: ./backend
+        run: |
+          # Create ECR repository if it doesn't exist
+          aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND 2>/dev/null || \
+            aws ecr create-repository --repository-name $ECR_REPOSITORY_BACKEND
+
+          # Build, tag and push
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:latest
+
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  # Deploy Infrastructure
+  deploy-infrastructure:
+    name: 🏗️ Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    environment: ${{ needs.build-and-push.outputs.environment }}
+    outputs:
+      cluster-name: ${{ steps.deploy.outputs.cluster-name }}
+      service-name: ${{ steps.deploy.outputs.service-name }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🏗️ Deploy CloudFormation stacks
+        id: deploy
+        env:
+          ENVIRONMENT: ${{ needs.build-and-push.outputs.environment }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          # Deploy VPC stack
+          aws cloudformation deploy \
+            --template-file infrastructure/cloudformation/vpc.yaml \
+            --stack-name portfolio-vpc-$ENVIRONMENT \
+            --region $AWS_REGION \
+            --parameter-overrides Environment=$ENVIRONMENT \
+            --no-fail-on-empty-changeset
+
+          # Deploy ALB stack
+          aws cloudformation deploy \
+            --template-file infrastructure/cloudformation/alb.yaml \
+            --stack-name portfolio-alb-$ENVIRONMENT \
+            --region $AWS_REGION \
+            --parameter-overrides \
+              Environment=$ENVIRONMENT \
+              VPC=$(aws cloudformation describe-stacks --stack-name portfolio-vpc-$ENVIRONMENT --query 'Stacks[0].Outputs[?OutputKey==`VPC`].OutputValue' --output text) \
+              PublicSubnets=$(aws cloudformation describe-stacks --stack-name portfolio-vpc-$ENVIRONMENT --query 'Stacks[0].Outputs[?OutputKey==`PublicSubnets`].OutputValue' --output text) \
+            --no-fail-on-empty-changeset
+
+          # Deploy ECS stack
+          aws cloudformation deploy \
+            --template-file infrastructure/cloudformation/ecs.yaml \
+            --stack-name portfolio-ecs-$ENVIRONMENT \
+            --region $AWS_REGION \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              Environment=$ENVIRONMENT \
+              VPC=$(aws cloudformation describe-stacks --stack-name portfolio-vpc-$ENVIRONMENT --query 'Stacks[0].Outputs[?OutputKey==`VPC`].OutputValue' --output text) \
+              PrivateSubnets=$(aws cloudformation describe-stacks --stack-name portfolio-vpc-$ENVIRONMENT --query 'Stacks[0].Outputs[?OutputKey==`PrivateSubnets`].OutputValue' --output text) \
+              PublicSubnets=$(aws cloudformation describe-stacks --stack-name portfolio-vpc-$ENVIRONMENT --query 'Stacks[0].Outputs[?OutputKey==`PublicSubnets`].OutputValue' --output text) \
+              FrontendImage=${{ needs.build-and-push.outputs.frontend-image }} \
+              BackendImage=${{ needs.build-and-push.outputs.backend-image }} \
+              MongoDBURI="$MONGODB_URI" \
+            --no-fail-on-empty-changeset
+
+          # Set outputs
+          echo "cluster-name=portfolio-ecs-$ENVIRONMENT-cluster" >> $GITHUB_OUTPUT
+          echo "service-name=portfolio-ecs-$ENVIRONMENT-service" >> $GITHUB_OUTPUT
+
+  # Update ECS Service
+  update-service:
+    name: 🔄 Update ECS Service
+    runs-on: ubuntu-latest
+    needs: [build-and-push, deploy-infrastructure]
+    environment: ${{ needs.build-and-push.outputs.environment }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 📝 Generate task definition
+        id: task-def
+        env:
+          ENVIRONMENT: ${{ needs.build-and-push.outputs.environment }}
+          FRONTEND_IMAGE: ${{ needs.build-and-push.outputs.frontend-image }}
+          BACKEND_IMAGE: ${{ needs.build-and-push.outputs.backend-image }}
+        run: |
+          # Create task definition JSON
+          cat > task-definition.json << EOF
+          {
+            "family": "portfolio-$ENVIRONMENT-tasks",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "512",
+            "memory": "1024",
+            "executionRoleArn": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ecsTaskExecutionRole",
+            "containerDefinitions": [
+              {
+                "name": "frontend",
+                "image": "$FRONTEND_IMAGE",
+                "portMappings": [
+                  {
+                    "containerPort": 80,
+                    "protocol": "tcp"
+                  }
+                ],
+                "essential": true,
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/portfolio-$ENVIRONMENT-frontend",
+                    "awslogs-region": "$AWS_REGION",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                }
+              },
+              {
+                "name": "backend",
+                "image": "$BACKEND_IMAGE",
+                "portMappings": [
+                  {
+                    "containerPort": 8080,
+                    "protocol": "tcp"
+                  }
+                ],
+                "environment": [
+                  {
+                    "name": "MONGODB_URI",
+                    "value": "${{ secrets.MONGODB_URI }}"
+                  },
+                  {
+                    "name": "PORT",
+                    "value": "8080"
+                  },
+                  {
+                    "name": "ENVIRONMENT",
+                    "value": "$ENVIRONMENT"
+                  }
+                ],
+                "essential": true,
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/portfolio-$ENVIRONMENT-backend",
+                    "awslogs-region": "$AWS_REGION",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+
+      - name: 🚀 Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          service: ${{ needs.deploy-infrastructure.outputs.service-name }}
+          cluster: ${{ needs.deploy-infrastructure.outputs.cluster-name }}
+          wait-for-service-stability: true
+
+      - name: 🎉 Get deployment URL
+        id: get-url
+        env:
+          ENVIRONMENT: ${{ needs.build-and-push.outputs.environment }}
+        run: |
+          URL=$(aws cloudformation describe-stacks \
+            --stack-name portfolio-alb-$ENVIRONMENT \
+            --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerURL`].OutputValue' \
+            --output text)
+          echo "🚀 Application deployed to: $URL"
+          echo "deployment-url=$URL" >> $GITHUB_OUTPUT
+
+      - name: 💬 Comment PR with deployment URL
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🚀 **Deployment Complete!**\n\n📱 **Preview URL**: ${{ steps.get-url.outputs.deployment-url }}\n🏷️ **Environment**: ${{ needs.build-and-push.outputs.environment }}\n📦 **Frontend**: ${{ needs.build-and-push.outputs.frontend-image }}\n📦 **Backend**: ${{ needs.build-and-push.outputs.backend-image }}`
+            })
+
+  # Run smoke tests
+  smoke-tests:
+    name: 🧪 Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [update-service, deploy-infrastructure]
+    if: always() && needs.update-service.result == 'success'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🧪 Run health checks
+        env:
+          ENVIRONMENT: ${{ needs.build-and-push.outputs.environment }}
+        run: |
+          # Get load balancer URL
+          URL=$(aws cloudformation describe-stacks \
+            --stack-name portfolio-alb-$ENVIRONMENT \
+            --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerURL`].OutputValue' \
+            --output text)
+
+          echo "Testing deployment at: $URL"
+
+          # Wait for service to be stable
+          sleep 30
+
+          # Test health endpoint
+          echo "🏥 Testing health endpoint..."
+          curl -f "$URL/health" || exit 1
+
+          # Test frontend
+          echo "🌐 Testing frontend..."
+          curl -f "$URL" -o /dev/null || exit 1
+
+          # Test API endpoint
+          echo "📡 Testing API endpoint..."
+          curl -f "$URL/api/v1/portfolio" -o /dev/null || exit 1
+
+          echo "✅ All smoke tests passed!"
