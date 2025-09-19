@@ -117,7 +117,7 @@ const Portfolio = () => {
         className="fixed top-6 right-6 z-50 bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-full shadow-lg transition-all duration-200 hover:scale-110"
       >
         {isEditing ? <Save size={20} /> : <Edit3 size={20} />}
-    </button>
+      </button>
 
       {/* Header Section */}
       <div className="relative overflow-hidden">
@@ -274,14 +274,84 @@ const Portfolio = () => {
               {isEditing && (
                 <button
                   onClick={() => addProjectPoint(project.id)}
-                  className="text-blue-400 hover:text-blue-300 px-3 py-1 rounded transition-colors"
+                  className="text-blue-400 hover:text-blue-300 flex items-center space-x-2 mb-4"
                 >
                   <Plus size={16} />
                   <span>Add Point</span>
                 </button>
               )}
+
+              <div>
+                <p className="text-sm font-semibold text-blue-400 mb-2">Skills Used:</p>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={project.skills.join(', ')}
+                    onChange={(e) => updateSkills(project.id, e.target.value)}
+                    placeholder="Enter skills separated by commas"
+                    className="w-full bg-transparent border border-blue-400 rounded p-2 text-gray-300 focus:outline-none focus:border-blue-300"
+                  />
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {project.skills.map((skill, index) => (
+                      <span
+                        key={index}
+                        className="bg-blue-600/30 text-blue-300 px-3 py-1 rounded-full text-sm border border-blue-400/30"
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Skills Overview */}
+      <div className="max-w-6xl mx-auto px-6 py-16">
+        <h2 className="text-3xl font-bold text-white mb-12 flex items-center">
+          <Brain className="mr-3 text-purple-400" />
+          Technical Expertise
+        </h2>
+        
+        <div className="grid md:grid-cols-3 gap-8">
+          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+            <Cloud className="text-blue-400 mb-4" size={32} />
+            <h3 className="text-xl font-bold text-white mb-3">Cloud & DevOps</h3>
+            <div className="flex flex-wrap gap-2">
+              {['AWS', 'Docker', 'Kubernetes', 'CI/CD', 'Terraform'].map(skill => (
+                <span key={skill} className="bg-blue-600/30 text-blue-300 px-2 py-1 rounded text-sm">
+                  {skill}
+                </span>
+              ))}
+            </div>
+          </div>
+          
+          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+            <Code className="text-green-400 mb-4" size={32} />
+            <h3 className="text-xl font-bold text-white mb-3">Backend & APIs</h3>
+            <div className="flex flex-wrap gap-2">
+              {['Go', 'Node.js', 'Python', 'REST APIs', 'GraphQL'].map(skill => (
+                <span key={skill} className="bg-green-600/30 text-green-300 px-2 py-1 rounded text-sm">
+                  {skill}
+                </span>
+              ))}
+            </div>
+          </div>
+          
+          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+            <Database className="text-purple-400 mb-4" size={32} />
+            <h3 className="text-xl font-bold text-white mb-3">ML & Data</h3>
+            <div className="flex flex-wrap gap-2">
+              {['TensorFlow', 'PyTorch', 'SageMaker', 'MongoDB', 'PostgreSQL'].map(skill => (
+                <span key={skill} className="bg-purple-600/30 text-purple-300 px-2 py-1 rounded text-sm">
+                  {skill}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
