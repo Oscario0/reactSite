@@ -2,7 +2,7 @@ name: Deploy Portfolio to AWS ECS
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 env:
@@ -37,7 +37,7 @@ jobs:
         run: |
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND 2>/dev/null || \
             aws ecr create-repository --repository-name $ECR_REPOSITORY_FRONTEND
-          
+
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
 
@@ -49,7 +49,7 @@ jobs:
         run: |
           aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND 2>/dev/null || \
             aws ecr create-repository --repository-name $ECR_REPOSITORY_BACKEND
-          
+
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
 
@@ -59,40 +59,10 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           aws cloudformation deploy \
-            --template-file infrastructure/cloudformation/vpc.yaml \
-            --stack-name portfolio-vpc \
-            --no-fail-on-empty-changeset
-
-          VPC_ID=$(aws cloudformation describe-stacks \
-            --stack-name portfolio-vpc \
-            --query 'Stacks[0].Outputs[?OutputKey==`VPC`].OutputValue' \
-            --output text)
-          
-          PUBLIC_SUBNETS=$(aws cloudformation describe-stacks \
-            --stack-name portfolio-vpc \
-            --query 'Stacks[0].Outputs[?OutputKey==`PublicSubnets`].OutputValue' \
-            --output text)
-          
-          PRIVATE_SUBNETS=$(aws cloudformation describe-stacks \
-            --stack-name portfolio-vpc \
-            --query 'Stacks[0].Outputs[?OutputKey==`PrivateSubnets`].OutputValue' \
-            --output text)
-
-          aws cloudformation deploy \
-            --template-file infrastructure/cloudformation/alb.yaml \
-            --stack-name portfolio-alb \
-            --parameter-overrides \
-              VPC=$VPC_ID \
-              PublicSubnets=$PUBLIC_SUBNETS \
-            --no-fail-on-empty-changeset
-
-          aws cloudformation deploy \
-            --template-file infrastructure/cloudformation/ecs.yaml \
-            --stack-name portfolio-ecs \
+            --template-file infra/main.yml \
+            --stack-name portfolio-infrastructure \
             --capabilities CAPABILITY_IAM \
             --parameter-overrides \
-              VPC=$VPC_ID \
-              PrivateSubnets=$PRIVATE_SUBNETS \
               FrontendImage=$ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
               BackendImage=$ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG \
               MongoDBURI="${{ secrets.MONGODB_URI }}" \
@@ -112,7 +82,7 @@ jobs:
       - name: Get deployment URL
         run: |
           URL=$(aws cloudformation describe-stacks \
-            --stack-name portfolio-alb \
+            --stack-name portfolio-infrastructure \
             --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerURL`].OutputValue' \
             --output text)
           echo "Deployment complete! URL: $URL"
