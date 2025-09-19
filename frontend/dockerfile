@@ -9,13 +9,13 @@ COPY package*.json ./
 # Install dependencies (use npm install instead of npm ci for first time)
 RUN npm install --only=production
 
+# Fix vulnerabilities
+RUN npm audit fix --force
 # Copy source code
 COPY . .
 
 # Build the app
 RUN npm run build
-# Fix vulnerabilities
-RUN npm audit fix --force
 
 # Production stage with Nginx
 FROM nginx:alpine
