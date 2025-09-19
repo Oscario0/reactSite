@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN npm install --silent
+RUN npm i
 COPY . .
 RUN npm run build
 EXPOSE 3000
