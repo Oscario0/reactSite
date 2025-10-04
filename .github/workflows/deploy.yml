@@ -11,8 +11,8 @@ env:
   ECR_REPOSITORY_BACKEND: portfolio-backend
 
   FORCE_SKIP_FRONTEND: "false" 
-  FORCE_SKIP_BACKEND: "true" 
-  FORCE_SKIP_DEPLOY: "true"
+  FORCE_SKIP_BACKEND: "false" 
+  FORCE_SKIP_DEPLOY: "false"
 
 jobs:
   build-and-deploy:
