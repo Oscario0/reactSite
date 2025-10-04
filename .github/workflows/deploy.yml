@@ -9,10 +9,10 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY_FRONTEND: portfolio-frontend
   ECR_REPOSITORY_BACKEND: portfolio-backend
-  # Force skip settings (set to 'true' to always skip regardless of commit message)
-  FORCE_SKIP_FRONTEND: "true"
-  FORCE_SKIP_BACKEND: "true"
-  FORCE_SKIP_DEPLOY: "false"
+
+  FORCE_SKIP_FRONTEND: "false" 
+  FORCE_SKIP_BACKEND: "true" 
+  FORCE_SKIP_DEPLOY: "true"
 
 jobs:
   build-and-deploy:
@@ -59,6 +59,14 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
 
+      - name: Build moved to GitHub Pages
+        if: steps.check-skip.outputs.skip-deploy == 'false'
+        working-directory: ./frontend
+        run: |
+          echo "Building website..."
+          npm ci
+          npm run build
+
       - name: Build and push backend image
         if: steps.check-skip.outputs.skip-backend == 'false'
         env:
@@ -73,73 +81,17 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
 
-      - name: Deploy infrastructure
+      - name: Build and Deploy to GitHub Pages
         if: steps.check-skip.outputs.skip-deploy == 'false'
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          STACK_STATUS=$(aws cloudformation describe-stacks --stack-name portfolio-infrastructure --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-
-          echo "Current stack status: $STACK_STATUS"
-
-          if [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ]; then
-            echo "Stack is in ROLLBACK_COMPLETE state. Deleting stack first..."
-            aws cloudformation delete-stack --stack-name portfolio-infrastructure
-            echo "Waiting for stack deletion to complete..."
-            aws cloudformation wait stack-delete-complete --stack-name portfolio-infrastructure
-            echo "Stack deleted successfully."
-          fi
-
-          echo "Deploying infrastructure..."
-          aws cloudformation deploy \
-            --template-file infra/main.yml \
-            --stack-name portfolio-infrastructure \
-            --capabilities CAPABILITY_IAM \
-            --parameter-overrides \
-              FrontendImage=$ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
-              BackendImage=$ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG \
-              MongoDBURI="${{ secrets.MONGODB_URI }}" \
-            --no-fail-on-empty-changeset || {
-            echo "CloudFormation deployment failed! Checking stack events for debugging..."
-            aws cloudformation describe-stack-events \
-              --stack-name portfolio-infrastructure \
-              --query 'StackEvents[0:20].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
-              --output table || echo "Could not retrieve stack events"
-            exit 1
-          }
-
-          echo "Deployment successful! Checking final stack events..."
-          aws cloudformation describe-stack-events \
-            --stack-name portfolio-infrastructure \
-            --query 'StackEvents[0:10].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
-            --output table || echo "Could not retrieve stack events"
-
-      - name: Update ECS service
-        if: steps.check-skip.outputs.skip-deploy == 'false'
-        run: |
-          echo "Updating ECS service (not skipped)..."
-          aws ecs update-service \
-            --cluster portfolio-cluster \
-            --service portfolio-service \
-            --force-new-deployment
-
-          aws ecs wait services-stable \
-            --cluster portfolio-cluster \
-            --services portfolio-service
-
-      - name: Get deployment URL
-        if: steps.check-skip.outputs.skip-deploy == 'false'
-        run: |
-          URL=$(aws cloudformation describe-stacks \
-            --stack-name portfolio-infrastructure \
-            --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerURL`].OutputValue' \
-            --output text)
-          echo "Deployment complete! URL: $URL"
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./frontend/build
+          cname: Oscario.com
 
       - name: Summary
         run: |
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend: ${{ steps.check-skip.outputs.skip-frontend == 'true' && '⏭️ Skipped' || '✅ Built' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Backend: ${{ steps.check-skip.outputs.skip-backend == 'true' && '⏭️ Skipped' || '✅ Built' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Deploy: ${{ steps.check-skip.outputs.skip-deploy == 'true' && '⏭️ Skipped' || '✅ Deployed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: ${{ steps.check-skip.outputs.skip-frontend == 'true' && '⏭️ Skipped' || 'Built' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend: ${{ steps.check-skip.outputs.skip-backend == 'true' && '⏭️ Skipped' || 'Built' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Deploy: ${{ steps.check-skip.outputs.skip-deploy == 'true' && '⏭️ Skipped' || 'Deployed' }}" >> $GITHUB_STEP_SUMMARY
