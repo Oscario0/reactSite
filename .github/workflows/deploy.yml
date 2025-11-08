@@ -87,6 +87,6 @@ jobs:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: |
-          echo "Deploying..."
+          echo "Deploying to Netlify..."
           npm install -g netlify-cli --no-audit --no-fund --silent
-          netlify deploy --create-site <reactsite> --dir frontend/build --prod
+          netlify deploy --prod --dir=frontend/build --site=$NETLIFY_SITE_ID --auth=$NETLIFY_AUTH_TOKEN
