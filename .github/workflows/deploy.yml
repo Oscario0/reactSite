@@ -10,8 +10,8 @@ env:
   ECR_REPOSITORY_FRONTEND: portfolio-frontend
   ECR_REPOSITORY_BACKEND: portfolio-backend
 
-  FORCE_SKIP_FRONTEND: "false" 
-  FORCE_SKIP_BACKEND: "false" 
+  FORCE_SKIP_FRONTEND: "false"
+  FORCE_SKIP_BACKEND: "false"
   FORCE_SKIP_DEPLOY: "false"
 
 jobs:
@@ -59,8 +59,8 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
 
-      - name: Build moved to GitHub Pages
-        if: steps.check-skip.outputs.skip-deploy == 'false'
+      - name: Build React app
+        if: steps.check-skip.outputs.skip-frontend == 'false' || steps.check-skip.outputs.skip-deploy == 'false'
         working-directory: ./frontend
         run: |
           echo "Building website..."
@@ -81,17 +81,13 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
 
-      - name: Build and Deploy to GitHub Pages
+      - name: Deploy to Netlify
         if: steps.check-skip.outputs.skip-deploy == 'false'
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./frontend/build
-          cname: Oscario.com
-
-      - name: Summary
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend: ${{ steps.check-skip.outputs.skip-frontend == 'true' && '⏭️ Skipped' || 'Built' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Backend: ${{ steps.check-skip.outputs.skip-backend == 'true' && '⏭️ Skipped' || 'Built' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Deploy: ${{ steps.check-skip.outputs.skip-deploy == 'true' && '⏭️ Skipped' || 'Deployed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "Deploying..."
+          npm install -g netlify-cli --no-audit --no-fund --silent
+          netlify deploy --prod --dir=frontend/build --site=$NETLIFY_SITE_ID --auth=$NETLIFY_AUTH_TOKEN
+
