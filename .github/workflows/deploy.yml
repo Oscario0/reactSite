@@ -64,7 +64,7 @@ jobs:
         working-directory: ./frontend
         run: |
           echo "Building website..."
-          npm ci
+          npm install
           npm run build
 
       - name: Build and push backend image
@@ -90,4 +90,3 @@ jobs:
           echo "Deploying..."
           npm install -g netlify-cli --no-audit --no-fund --silent
           netlify deploy --prod --dir=frontend/build --site=$NETLIFY_SITE_ID --auth=$NETLIFY_AUTH_TOKEN
-
