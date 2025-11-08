@@ -12,6 +12,7 @@ env:
 
   FORCE_SKIP_FRONTEND: "true"
   FORCE_SKIP_BACKEND: "true"
+  FORCE_SKIP_BUILD: "true"
   FORCE_SKIP_DEPLOY: "false"
 
 jobs:
@@ -28,10 +29,13 @@ jobs:
           # Set skip flags based on environment variables only
           echo "skip-frontend=${{ env.FORCE_SKIP_FRONTEND }}" >> $GITHUB_OUTPUT
           echo "skip-backend=${{ env.FORCE_SKIP_BACKEND }}" >> $GITHUB_OUTPUT
+          echo "skip-build=${{ env.FORCE_SKIP_BUILD }}" >> $GITHUB_OUTPUT
           echo "skip-deploy=${{ env.FORCE_SKIP_DEPLOY }}" >> $GITHUB_OUTPUT
+
 
           echo "Frontend skip: ${{ env.FORCE_SKIP_FRONTEND }}"
           echo "Backend skip: ${{ env.FORCE_SKIP_BACKEND }}"
+          echo "Build skip: ${{ env.FORCE_SKIP_BUILD }}"
           echo "Deploy skip: ${{ env.FORCE_SKIP_DEPLOY }}"
 
       - name: Configure AWS credentials
@@ -81,12 +85,9 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
 
-      - name: Deploy to Netlify
+      - name: Deploy to Pages
         if: steps.check-skip.outputs.skip-deploy == 'false'
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-        run: |
-          echo "Deploying to Netlify..."
-          npm install -g netlify-cli --no-audit --no-fund --silent
-          netlify deploy --prod --dir=frontend/build --site=$NETLIFY_SITE_ID --auth=$NETLIFY_AUTH_TOKEN
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./frontend/build
