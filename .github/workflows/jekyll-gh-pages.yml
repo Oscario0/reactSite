@@ -1,0 +1,98 @@
+name: Deploy Portfolio to AWS ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY_FRONTEND: portfolio-frontend
+  ECR_REPOSITORY_BACKEND: portfolio-backend
+
+  FORCE_SKIP_FRONTEND: "true"
+  FORCE_SKIP_BACKEND: "true"
+  FORCE_SKIP_BUILD: "true"
+  FORCE_SKIP_DEPLOY: "false"
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set skip flags
+        id: check-skip
+        run: |
+          # Set skip flags based on environment variables only
+          echo "skip-frontend=${{ env.FORCE_SKIP_FRONTEND }}" >> $GITHUB_OUTPUT
+          echo "skip-backend=${{ env.FORCE_SKIP_BACKEND }}" >> $GITHUB_OUTPUT
+          echo "skip-build=${{ env.FORCE_SKIP_BUILD }}" >> $GITHUB_OUTPUT
+          echo "skip-deploy=${{ env.FORCE_SKIP_DEPLOY }}" >> $GITHUB_OUTPUT
+
+
+          echo "Frontend skip: ${{ env.FORCE_SKIP_FRONTEND }}"
+          echo "Backend skip: ${{ env.FORCE_SKIP_BACKEND }}"
+          echo "Build skip: ${{ env.FORCE_SKIP_BUILD }}"
+          echo "Deploy skip: ${{ env.FORCE_SKIP_DEPLOY }}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push frontend image
+        if: steps.check-skip.outputs.skip-frontend == 'false'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        working-directory: ./frontend
+        run: |
+          echo "Building frontend (not skipped)..."
+          aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND 2>/dev/null || \
+            aws ecr create-repository --repository-name $ECR_REPOSITORY_FRONTEND
+
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
+
+      - name: Build React app
+        if: steps.check-skip.outputs.skip-frontend == 'false' || steps.check-skip.outputs.skip-deploy == 'false'
+        working-directory: ./frontend
+        run: |
+          echo "Building website..."
+          npm install
+          npm run build
+
+      - name: Build and push backend image
+        if: steps.check-skip.outputs.skip-backend == 'false'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        working-directory: ./backend
+        run: |
+          echo "Building backend (not skipped)..."
+          aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND 2>/dev/null || \
+            aws ecr create-repository --repository-name $ECR_REPOSITORY_BACKEND
+
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
+
+      - name: Deploy to Pages
+        if: steps.check-skip.outputs.skip-deploy == 'false'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./frontend/build
