@@ -89,4 +89,4 @@ jobs:
         run: |
           echo "Deploying..."
           npm install -g netlify-cli --no-audit --no-fund --silent
-          netlify deploy --create-site <oscario> --dir frontend/build --prod
+          netlify deploy --create-site <reactsite> --dir frontend/build --prod
